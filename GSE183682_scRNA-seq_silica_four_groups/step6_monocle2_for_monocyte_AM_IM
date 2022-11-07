@@ -1,0 +1,99 @@
+lapply(paste('package:',names(sessionInfo()$otherPkgs),sep=""),detach,character.only=TRUE,unload=TRUE)
+
+
+
+library(Seurat)
+
+#file = "/data/home/longmin/code_test/silicosis_scRNAseq/unknown/cluster_anno_1122"
+file="G:/silicosis/sicosis/yll/macrophage/no cluster2/0.3/pure_cluster013_in_allmerge/monocle"
+dir.create(file)
+setwd(file)
+getwd()
+#load("G:/silicosis/sicosis/yll/macrophage/no cluster2/0.3/pure_cluster3_in_allmerge-IM/silicosis_cluster_merge.rds")
+load("G:/silicosis/sicosis/yll/macrophage/no cluster2/0.3/pure_cluster3_in_allmerge-IM/silicosis_cluster_merge_cell_type_formonocle.rds")
+
+table(Idents(All.merge),All.merge$stim)
+#All.merge$cell.type=All.merge$new.cluster.idents
+
+#save(All.merge,file ="G:/silicosis/sicosis/yll/macrophage/no cluster2/0.3/pure_cluster3_in_allmerge-IM/silicosis_cluster_merge_cell_type_formonocle.rds" )
+
+
+
+
+
+
+##	LYP	monocle2 Monocyte->Macrophage(AM3 AM2 AM1 IM)
+#
+getwd()
+dir.create(paste0(file, "/MOnocyte_macro"))
+setwd(paste0(file, "/MOnocyte_macro"))
+getwd()
+
+
+library(monocle)
+subset_data = subset(x = All.merge, idents = c("Monocyte", "AM1", "AM2", "AM3", "IM"), invert = FALSE)#	17226	7279
+table(Idents(subset_data))
+new.metadata <- merge(subset_data@meta.data,data.frame(Idents(subset_data)),by = "row.names",sort = FALSE)
+rownames(new.metadata)<-new.metadata[,1]
+head(subset_data@meta.data)
+subset_data@meta.data<-new.metadata
+expression_matrix <- as(as.matrix(subset_data@assays$RNA@counts), 'sparseMatrix')
+head(expression_matrix)
+cell_metadata <- new('AnnotatedDataFrame',data=subset_data@meta.data)
+head(cell_metadata)
+
+gene_annotation <- new('AnnotatedDataFrame',data=data.frame(gene_short_name = row.names(subset_data), row.names = row.names(subset_data)))
+head(gene_annotation)
+
+monocle_cds <- monocle::newCellDataSet(expression_matrix,phenoData = cell_metadata,featureData = gene_annotation,
+                                       lowerDetectionLimit = 0.5,expressionFamily = negbinomial.size())
+##褰掍竴鍖?######
+cds <- monocle_cds
+cds <- estimateSizeFactors(cds)
+cds <- estimateDispersions(cds)  ## Removing 110 outliers
+diff_test_res <- differentialGeneTest(cds,fullModelFormulaStr = "~ cell.type")
+
+### inference the pseudotrajectory########################################################
+# step1: select genes for orderding setOrderingFilter() #
+ordering_genes <- row.names (subset(diff_test_res, qval < 0.01))
+length(ordering_genes)# 6354
+cds <- setOrderingFilter(cds, ordering_genes)  
+# step2: dimension reduction=> reduceDimension()  DDRTree #
+cds <- reduceDimension(cds, max_components = 2,method = 'DDRTree')
+
+# step3: ordering the cells=> orderCells()
+cds <- orderCells(cds)
+
+getwd()
+#save(cds,file = "G:/silicosis/sicosis/yll/macrophage/no cluster2/0.3/pure_cluster013_in_allmerge/monocle/MOnocyte_macro/cds_after_ordercells.rds")
+load(file ="G:/silicosis/sicosis/yll/macrophage/no cluster2/0.3/pure_cluster013_in_allmerge/monocle/MOnocyte_macro/cds_after_ordercells.rds" )
+# visulaization #
+pdf("1.pseudutime.cell.type.pre.order.pdf")
+plot_cell_trajectory(cds, color_by = "cell.type")  
+dev.off()
+pdf("1.pseudutime.stim.pre.order.pdf")
+plot_cell_trajectory(cds, color_by = "stim")  
+dev.off()
+pdf("1.pseudutime.State.pre.order.pdf")
+plot_cell_trajectory(cds, color_by = "State")  
+dev.off()
+###### split ########
+pdf("2.split.pseudutime.Seurat.cell.type.pdf")
+plot_cell_trajectory(cds, color_by = 'cell.type') + facet_wrap(~cell.type)
+dev.off()
+pdf("2.split.pseudutime.stim.pdf")
+plot_cell_trajectory(cds, color_by = "stim") + facet_wrap(~stim)
+dev.off()
+table(pData(cds)$State,pData(cds)$cell.type)
+write.xlsx(table(pData(cds)$State,pData(cds)$cell.type), "State_cellType_summary.xlsx", colnames=T, rownames=T)
+table(pData(cds)$State,pData(cds)$stim)
+write.xlsx(table(pData(cds)$State,pData(cds)$stim), "State_Stim_summary.xlsx", colnames=T, rownames=T)
+##we set the state 2 as root ########state 2 with most cells in Endothelial cells
+cds <- orderCells(cds,root_state=1)
+pdf("3.pseudutime.Pseudotime.pdf")
+plot_cell_trajectory(cds, color_by = "Pseudotime")  
+dev.off()
+
+
+
+
